@@ -1,24 +1,185 @@
 ---
 layout: post
-title: "Write a Post"
-date: 2021-06-31
+title: "How Kprobe works"
+date: 2022-02-22
 categories: jekyll blogging
 ---
 
-The goal of this article is to add some extra info
-about blog writing with _Jekyll_.
+## Kprobe data structure
 
-## Structure your posts
+First, let's look at the attributes in [struct kprobe](https://github.com/torvalds/linux/blob/master/include/linux/kprobes.h#L59).
 
-Use level 2 (`##`) and if necessary level 3 (`###`) titles
-to structure your posts.
+```c
+struct kprobe {
+    ...
 
-## Display code snippets
+    /* location of the probe point */
+    kprobe_opcode_t *addr;
 
-You can display a block of code like the following using triple backticks.
-You can also specify the language after the first triple backticks.
+    /* EYONGGU: User can specify symbol+offset, which will be translated to addr */
+    const char *symbol_name;
+    unsigned int offset; /* offset into the symbol */
 
-```python
-def hello(name):
-    return f'hello {name}'
+    /* called by addr is executed */
+    kprobe_pre_handler_t pre_handler;
+    /* called after addr is executed, optional */
+    kprobe_post_handler_t post_handler;
+
+    /* Saved opcode (first bype, which has been replaced with breakpoint) */
+    kprobe_opcode_t opcode;
+
+    /* copy of the original instruction + other inst attributes (e.g. size, type) */
+    struct arch_specific_insn ainsn;
+
+    /* EYONGGU:
+        KPROBE_FLAG_DISABLED : temporarily disabled
+        KPROBE_FLAG_OPTIMIZED: optimized
+        KPROBE_FLAG_FTRACE:    using ftrace
+    */
+    u32 flags;
+    ...
+}
 ```
+
+[Global kprobe table]()
+```c
+static struct hlist_head kprobe_table[KPROBE_TABLE_SIZE];
+```
+
+
+## Register Kprobe
+
+The generic [register_kprobe()](https://github.com/torvalds/linux/blob/master/kernel/kprobes.c#L1632) calls arch specific impelmentation.
+
+```c
+int register_kprobe(struct kprobe *p)
+{
+    ...
+
+    /* Adjust probe address from symbol */
+    p->addr = kprobe_addr(p);
+
+    check_kprobe_address_safe();
+
+    /* EYONGGU: add kprobe into kprobe_table */
+    hlist_add_head_rcu(&p->hlist,
+            &kprobe_table[hash_ptr(p->addr, KPROBE_HASH_BITS)]);
+
+    /* EYONGGU: call arch_preare_kprobe_ftrace(p) if using ftrace,
+       otherwise call arch_prepare_kprobe(p)
+    */
+    preare_kprobe(p);
+
+    /*EYONGGU: call arch specific arch_arm_kprobe(p) below */
+    arm_kprobe(p)
+
+    /* Try to optimize kprobe */
+    try_to_optimize_kprobe(p);
+}
+```
+Here are the [X86 arch specific impelemenation](https://github.com/torvalds/linux/blob/master/arch/x86/kernel/kprobes/core.c#L722)
+
+On X86, Kprobe saves the original instruction at the address, replaces it with int3, ands add another int3 after the original instruction for single-step.
+```c
+int arch_prepare_kprobe(struct kprobe *p)
+{
+    /* EYONGGU: Check if addr can be probed,
+     e.g.
+     - if addr in SMP-alternatives range
+     - if addr is at an instruction boundary
+     */
+
+    /* EYONGGU: allocate memory for original instruction copy */
+    p->ainsn.insn = get_insn_slot();
+
+    /* EYONGGU: following function does:
+       - __copy_instruction(): copy the original instruction
+       - prepare_singlestep(): add an int3 right after the copied instruction for single-step
+       - text_poke(): write back the instruction into ROX insn buffer
+     */
+    arch_copy_kprobe(p);
+}
+
+void arch_arm_kprobe(struct kprobe *p)
+{
+    u8 int3 = INT3_INSN_OPCODE;  /* = 0xCC */
+
+    /*EYONGGU: update the instructions on a live kernel */
+    text_poke(addr, opcode, len);
+
+    /*EYONGGU: sync to all CPUs icache */
+    text_poke_sync();
+
+    ...
+}
+```
+
+
+## When Kprobe is hit
+
+On X86, when the kprobed addr is hit, the kernel is trapped into int3 handler.
+
+NOTE! I only show the simplified code by omitting reentrancy case.
+
+```c
+DEFINE_IDTENTRY_RAW(exc_int3)
+{
+    ...
+
+    do_int3(regs);
+
+    ...
+}
+
+
+static bool do_int3(struct pt_regs *regs)
+{
+    ...
+#ifdef CONFIG_KPROBES
+    kprobe_int3_handler(regs);
+#endif
+
+}
+```
+kprobe_int3_handler() would be entered twice, before and after the single-steped instruction.
+
+int kprobe_int3_handler(struct pt_regs *regs)
+{
+    ...
+
+    /* EYONGGU: get kprobe at addr (regs->ip - 8) from kprobe_table */
+    p = get_kprobe(addr);
+
+    if (p) {
+        /* EYONGGU: first hit for the probe. */
+        p->pre_handler(p, regs);
+
+        /* EYONGGU:
+           ... do something...
+
+           kcb->kprobe_status = KPROBE_HIT_SS;
+
+           but at the end, set ip to the saved instruction.
+            regs->ip = (unsigned long)p->ainsn.insn;
+
+           Because of another int3 after the save instruction, it is a single step.
+         */
+        setup_singlestep(p, regs, kcb, 0);
+
+    } else {
+        /* EYONGGU: after single-step */
+
+        /* EYONGGU: restore the regs->ip to next instruction */
+        resume_singlestep(p, regs, kcb);
+
+        /* EYONGGU:  run post handler
+           p->post_handler(cur, regs, 0);
+         */
+        kprobe_post_process(p, regs, kcb);
+    }
+}
+
+```
+
+
+
