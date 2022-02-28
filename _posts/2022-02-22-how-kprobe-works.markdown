@@ -2,12 +2,15 @@
 layout: post
 title: "How Kprobe works"
 date: 2022-02-22
-categories: jekyll blogging
+categories: Kprobe
+tags: [kprobe]
 ---
+
+In this article, we will look at how the kprobe is implemented, in particular for X86 architecture.
 
 ## Kprobe data structure
 
-First, let's look at the attributes in [struct kprobe](https://github.com/torvalds/linux/blob/master/include/linux/kprobes.h#L59).
+First, let's look at the important attributes in [struct kprobe](https://github.com/torvalds/linux/blob/master/include/linux/kprobes.h#L59).
 
 ```c
 struct kprobe {
@@ -41,7 +44,8 @@ struct kprobe {
 }
 ```
 
-[Global kprobe table]()
+All the registered kprobes are stored in the global hash table.
+
 ```c
 static struct hlist_head kprobe_table[KPROBE_TABLE_SIZE];
 ```
@@ -49,7 +53,14 @@ static struct hlist_head kprobe_table[KPROBE_TABLE_SIZE];
 
 ## Register Kprobe
 
-The generic [register_kprobe()](https://github.com/torvalds/linux/blob/master/kernel/kprobes.c#L1632) calls arch specific impelmentation.
+The generic [register_kprobe()](https://github.com/torvalds/linux/blob/master/kernel/kprobes.c#L1632) is used to register a kprobe.
+
+The function basically does:
+1. check if addr can be probed
+2. copy probed instruction
+3. insert break point
+
+The implementation of these steps are arch specific under the generic hood, below we will only look at X86 implementation.
 
 ```c
 int register_kprobe(struct kprobe *p)
@@ -70,16 +81,18 @@ int register_kprobe(struct kprobe *p)
     */
     preare_kprobe(p);
 
-    /*EYONGGU: call arch specific arch_arm_kprobe(p) below */
+    /* EYONGGU: call arch specific arch_arm_kprobe(p) below */
     arm_kprobe(p)
 
     /* Try to optimize kprobe */
     try_to_optimize_kprobe(p);
 }
 ```
-Here are the [X86 arch specific impelemenation](https://github.com/torvalds/linux/blob/master/arch/x86/kernel/kprobes/core.c#L722)
+Now, let's look at the [X86 arch specific impelemenation](https://github.com/torvalds/linux/blob/master/arch/x86/kernel/kprobes/core.c#L722)
 
 On X86, Kprobe saves the original instruction at the address, replaces it with int3, ands add another int3 after the original instruction for single-step.
+
+Some articles say that int1 debug exception after the original insturction is used to execute post_handle, but I didn't find it for X86 implementation, instead I see another int3 is inserted after the instruction.
 ```c
 int arch_prepare_kprobe(struct kprobe *p)
 {
@@ -114,12 +127,15 @@ void arch_arm_kprobe(struct kprobe *p)
 }
 ```
 
+After the Kprobe is registered, the program would looks like:
+![Kprobed code](/assets/kprobe_diag1.png)
+
 
 ## When Kprobe is hit
 
-On X86, when the kprobed addr is hit, the kernel is trapped into int3 handler.
+On X86, when the kprobed addr is hit, the kernel is trapped into int3 handler, so we start with the trap exception handling.
 
-NOTE! I only show the simplified code by omitting reentrancy case.
+NOTE! The Kprobe can be reentrant, which is not coverred here.
 
 ```c
 DEFINE_IDTENTRY_RAW(exc_int3)
@@ -141,8 +157,10 @@ static bool do_int3(struct pt_regs *regs)
 
 }
 ```
-kprobe_int3_handler() would be entered twice, before and after the single-steped instruction.
 
+kprobe_int3_handler() would be entered twice for one Kprobe, i.e. before and after the single-steped instruction.
+
+```c
 int kprobe_int3_handler(struct pt_regs *regs)
 {
     ...
@@ -178,7 +196,6 @@ int kprobe_int3_handler(struct pt_regs *regs)
         kprobe_post_process(p, regs, kcb);
     }
 }
-
 ```
 
 

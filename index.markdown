@@ -5,4 +5,4 @@
 layout: home
 ---
 
-Welcome to my demo blog!
+Welcome to my blog!
