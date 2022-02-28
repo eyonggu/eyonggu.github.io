@@ -2,11 +2,11 @@
 layout: post
 title: "How Kprobe works"
 date: 2022-02-22
-categories: Kprobe
+categories: jekyll blogging
 tags: [kprobe]
 ---
 
-In this article, we will look at how kprobe is implemented in Linux kernel, in particular on  X86 architecture.
+In this article, we will look at how kprobe is implemented in Linux kernel, in particular on X86 architecture.
 
 ## Kprobe data structure
 

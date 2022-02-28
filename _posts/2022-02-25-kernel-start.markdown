@@ -1,9 +1,11 @@
 ---
 layout: post
 title: "Kernel start"
-date: 2022-02-22
+date: 2022-02-25
 categories: jekyll blogging
 ---
+
+Linux kernel start is also a very interesting area for anyone whole wants to understand everything from bootom.
 
 ## main() function of kernel
 
