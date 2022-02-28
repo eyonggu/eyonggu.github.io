@@ -1,7 +1,7 @@
 ---
 layout: post
 title: "How Kprobe trace works"
-date: 2022-02-22
+date: 2022-02-23
 categories: jekyll blogging
 ---
 

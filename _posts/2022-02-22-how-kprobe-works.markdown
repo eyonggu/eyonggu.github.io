@@ -6,7 +6,7 @@ categories: Kprobe
 tags: [kprobe]
 ---
 
-In this article, we will look at how the kprobe is implemented, in particular for X86 architecture.
+In this article, we will look at how kprobe is implemented in Linux kernel, in particular on  X86 architecture.
 
 ## Kprobe data structure
 
