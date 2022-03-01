@@ -60,8 +60,6 @@ The function basically does:
 2. copy probed instruction
 3. insert break point
 
-The implementation of these steps are arch specific under the generic hood, below we will only look at X86 implementation.
-
 ```c
 int register_kprobe(struct kprobe *p)
 {
@@ -88,11 +86,12 @@ int register_kprobe(struct kprobe *p)
     try_to_optimize_kprobe(p);
 }
 ```
-Now, let's look at the [X86 arch specific impelemenation](https://github.com/torvalds/linux/blob/master/arch/x86/kernel/kprobes/core.c#L722)
+The implementation of these steps are arch specific under the generic hood, you can find the [X86 arch specific Kprobe impelemenation](https://github.com/torvalds/linux/blob/master/arch/x86/kernel/kprobes/core.c#L722) here.
 
-On X86, Kprobe saves the original instruction at the address, replaces it with int3, ands add another int3 after the original instruction for single-step.
+**arch_prepare_kprobe()** copies the original instruction and saves it in some instruction cache page, to single step the instruction for post_handle, another int3 is added after the saved original instruction.
 
-Some articles say that int1 debug exception after the original insturction is used to execute post_handle, but I didn't find it for X86 implementation, instead I see another int3 is inserted after the instruction.
+**arch_arm_kprobe()** then replaces the orignal instuction with int3 (0xCC) at the address.
+
 ```c
 int arch_prepare_kprobe(struct kprobe *p)
 {
@@ -127,13 +126,14 @@ void arch_arm_kprobe(struct kprobe *p)
 }
 ```
 
-After the Kprobe is registered, the program would looks like:
+After Kprobe_register() call, the program would looks like:
+
 ![Kprobed code](/assets/kprobe_diag1.png)
 
 
 ## When Kprobe is hit
 
-On X86, when the kprobed addr is hit, the kernel is trapped into int3 handler, so we start with the trap exception handling.
+Since now the int3 instruction is placed at the kprobed address, when the program runs to the address, the kernel is trapped into int3 handler, so let's start to look at the trap exception handling.
 
 NOTE! The Kprobe can be reentrant, which is not coverred here.
 
