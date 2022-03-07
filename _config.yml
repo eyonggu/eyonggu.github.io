@@ -19,6 +19,7 @@ navbar-links:
     - Linux Cross Reference: "https://elixir.bootlin.com/linux/latest/source"
     - Linux Kernel Documentation: "https://www.kernel.org/doc/html/latest/index.html"
     - Linux Man Pages: "https://www.mankier.com/"
+    - Linux Insight: "https://0xax.gitbooks.io/linux-insides/content/"
 
 # --- Logo --- #
 

@@ -82,7 +82,7 @@ int register_kprobe(struct kprobe *p)
     /* EYONGGU: call arch specific arch_arm_kprobe(p) below */
     arm_kprobe(p)
 
-    /* Try to optimize kprobe */
+    /* Try to optimize normal (non-ftrace-based) kprobe */
     try_to_optimize_kprobe(p);
 }
 ```

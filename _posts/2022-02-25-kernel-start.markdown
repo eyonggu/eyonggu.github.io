@@ -3,9 +3,12 @@ layout: post
 title: "Kernel start"
 date: 2022-02-25
 categories: jekyll blogging
+published: false
 ---
 
 Linux kernel start is also a very interesting area for anyone whole wants to understand everything from bootom.
+
+Just as for any user space program, the main() function is **not** the first executed instruction when it is started, same for kernel. There are many activities done before the main() function, for example, CPU/Memory HW preparation. To complicate the matter, quite many of those activities are implemented in assembly code, which makes it even harder to study,
 
 ## main() function of kernel
 
@@ -35,8 +38,11 @@ void main(void)
 }
 ```
 
-## Kernel startup
-[start_kernel()](https://github.com/torvalds/linux/blob/master/init/main.c#L927) is a generic function that is very big and does lot of initialization. It's not possible to cover all, instead, only some important/interesting init will be detailed here.
+## Kernel start
+
+In the kernel file [init/main.c](https://github.com/torvalds/linux/blob/master/init/main.c), function [start_kernel()](https://github.com/torvalds/linux/blob/master/init/main.c#L927) does the kernel initization and launtch the first *init* process.
+
+start_kernel() function is very big, it's not possible to cover everything in this article, there will more articles later on to cover some specific areas.
 
 ```c
 asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
@@ -130,7 +136,7 @@ void __init setup_arch(char **cmdline_p)
 }
 ```
 
-
+## Links
 
 
 
