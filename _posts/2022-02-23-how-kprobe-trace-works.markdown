@@ -6,7 +6,7 @@ categories: jekyll blogging
 tags: [kprobe, tracing]
 ---
 
-In previous article, we looked at how normal kprobe works. In this one, let's look at how the kprobe-based trace event works.
+In previous article, we looked at how normal kprobe works. Based on kprobe, it is possible to create dynamic trace event. In this one, let's look at ohow the kprobe-based trace event works.
 
 Compared to other kind trace events (TracePoint/function tracer), kprobe-based trace event has the advantages:
 - can probe anywhere (symbol + offset) and function return (kretprobe).
@@ -39,7 +39,7 @@ Synopsis of kprobe_events:
  -:[GRP/]EVENT                                         : Clear a probe
 ```
 
-An event is defined by *[GRP/][EVENT]*, Kprobe is defined by *[MOD:]SYM[+offs]|MEMADDR*.
+An event is defined by ``[GRP/][EVENT]``, Kprobe is defined by ``[MOD:]SYM[+offs]|MEMADDR``.
 
 It is possible to add multiple kprobes to the same event, for example:
 
