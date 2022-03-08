@@ -57,7 +57,7 @@ echo p:testevent fork_idle >> kprobe_events
 
 The kprobe-based event trace is implemented in [kernel/trace/trace_kprobe.c](https://github.com/torvalds/linux/blob/master/kernel/trace/trace_kprobe.c).
 
-When a new kprobe-based event is written to sysfs *kprobe_events* file, function *probes_write*(kprobe_events_ops.write) is called to create a new event.
+When a new event is written to sysfs *kprobe_events* file, function *probes_write*(kprobe_events_ops.write) is called to create a new event.
 
 ```c
 static const struct file_operations kprobe_events_ops = {
@@ -72,7 +72,7 @@ static ssize_t probes_write(struct file *file, const char __user *buffer,
 }
 ```
 
-The kprobe-based event creation is done in *__trace_kprobe_create()* function.
+The event creation is done in *__trace_kprobe_create()* function.
 ```c
 static int __trace_kprobe_create(int argc, const char *argv[])
 {

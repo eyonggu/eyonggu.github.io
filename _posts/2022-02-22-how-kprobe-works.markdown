@@ -197,6 +197,104 @@ int kprobe_int3_handler(struct pt_regs *regs)
     }
 }
 ```
+## Kprobe optimization (TODO)
 
+As seen in the register_kprobe() above, the last step is to call a function try_to_optimize_kprobe(p), which tries to optimize the kprobe by replacing a breakpoint with a jump instruction. Jump optimization reduces probing overhead drastically.
 
+Note, the optimization is only applicable to normal kprobe, i.e. excluding ftrace kprobe.
 
+```c
+static void try_to_optimize_kprobe(struct kprobe *p)
+{
+    struct kprobe *ap;
+    struct optimized_kprobe *op;
+
+    /* EYONGGU: not applicable for ftrace kprobe */
+    if (kprobe_ftrace(p))
+        return;
+
+    /* EYONGGU: allocate an op, and prepare it, see below */
+    ap = alloc_aggr_kprobe(p);
+
+    /* EYONGGU: if not suitable for optimization, fallback to kprobe */
+    if (!arch_prepared_optinsn(&op->optinsn)) {
+        ...
+
+        goto out;
+    }
+
+    init_aggr_kprobe(ap, p);
+
+    /* EYONGGU: enqueues the kprobe to optimizing list
+       and kicks kprobe-optimizer workqueue to optimize it
+     */
+    optimize_kprobe(ap);
+
+    ...
+}
+
+int arch_prepare_optimized_kprobe(struct optimized_kprobe *op,
+        struct kprobe *__unused)
+{
+    /* EYONGGU: safety check */
+    if (!can_optimize((unsigned long)op->kp.addr))
+        return -EILSEQ;
+
+    /* EYONGGU: Preparing detour code */
+    buf = kzalloc(MAX_OPTINSN_SIZE, GFP_KERNEL);
+
+    op->optinsn.insn = slot = get_optinsn_slot();
+
+    /* copy arch-dep-instance from template */
+    memcpy(buf, optprobe_template_entry, TMPL_END_IDX);
+
+    /* Copy instructions into the out-of-line buffer */
+    ret = copy_optimized_instructions(buf + TMPL_END_IDX, op->kp.addr, slot + TMPL_END_IDX);
+
+    ...
+
+    perf_event_text_poke(slot, NULL, 0, buf, len);
+    text_poke(slot, buf, len);
+
+    ...
+}
+```
+
+## How Does a Return Probe (kretprobe) Work
+
+When register_kretprobe() is called, Kprobes establishes a kprobe at the entry to the function.
+
+This kprobe pre_handler is registered with every kretprobe. When probe hits it will set up the return probe.
+- saves a copy of the return address
+- replaces the return address with the address of a "trampoline."
+
+The trampoline is an arbitrary piece of code -- typically just a nop instruction.  At boot time, Kprobes registers a kprobe at the trampoline
+
+```c
+int register_kretprobe(struct kretprobe *rp)
+{
+    kprobe_on_func_entry(rp->kp.addr, rp->kp.symbol_name, rp->kp.offset);
+
+    rp->kp.pre_handler = pre_handler_kretprobe;
+    rp->kp.post_handler = NULL;
+
+    ret = register_kprobe(&rp->kp);
+}
+```
+
+When the probed function executes its return instruction, control passes to the trampoline and that probe is hit, Kprobes' trampoline handler calls the user-specified return handler associated with the kretprobe, then sets the saved instruction pointer to the saved return address, and that's where execution resumes upon return from the trap.
+
+```c
+static int pre_handler_kretprobe(struct kprobe *p, struct pt_regs *regs)
+{
+    ...
+
+    arch_prepare_kretprobe(ri, regs);
+
+    ...
+}
+```
+
+## Links
+- [Kernel Probes (Kprobes)](https://www.kernel.org/doc/Documentation/kprobes.txt)
+- [kprobes: Kprobes jump optimization support](https://lwn.net/Articles/340319/)
