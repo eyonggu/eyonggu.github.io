@@ -10,35 +10,45 @@ published: true
 
 ## Key Data Structure
 - struct rcu_state
+
   RCU global state, including node hierarchy.
 
 - struct rcu_node
+
   Definition for node within the RCU grace-period-detection hierarchy
 
 - struct rcu_data
+
   Per-CPU data for RCU
 
 - struct rcu_head/calback_head
+
   callback structure for use with RCU and task_work
 
 
 - struct rcu_segcblist
+
   RCU segmented callback lists
 
 
 ## RCU Kthread creation
 
+TODO: make a table
+
 - rcuc/x:  per-CPU kthread per CPU
+
   rcu_core() peforms RCU core processing work.
 
   Thread function: rcu_cpu_kthread()
 
 - rcu_preempt / rcu_sched
+
   RCU GP kthread.
 
   Thread function: rcu_gp_kthread()
 
 - rcuo[p/s]/x
+
   NO-CB RCU offload kthread.
 
   rcuop/x for RCU-preempt, rucos for RCU-sched.
@@ -46,6 +56,7 @@ published: true
   Thread function: rcu_nocb_cb_kthread()
 
 - rcuog
+
   RCU NO-CBs Grace Period kthread for a group of CPUs
 
   Thread function: rcu_nocb_gp_kthread()
@@ -53,13 +64,16 @@ published: true
 - rcub
 
 - rcu_tasks_kthread
+
   Task-based RCU grace-period kthread.
   Spawned by `rcu_spawn_tasks_kthread_generic(struct rcu_tasks *rtp)`.
 
 - rcu_gp
+
   ???
 
 - rcu_par_gp
+
   ???
 
 ## RCU init
