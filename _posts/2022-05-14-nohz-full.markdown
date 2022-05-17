@@ -1,0 +1,73 @@
+---
+layout: post
+title: "NO_HZ_FULL introduction"
+date: 2022-05-14
+categories: jekyll blogging
+published: false
+---
+
+## How and what to isolate CPUs
+
+There are two ways to isolate CPUs:
+- boot param: isolcpus
+- boot param: nohz_full
+
+There are following FLAGs defined for isolating CPU with different components:
+```c
+enum hk_flags {
+    HK_FLAG_TIMER
+    HK_FLAG_RCU
+    HK_FLAG_MISC
+    HK_FLAG_TICK
+    HK_FLAG_DOMAIN
+    HK_FLAG_WQ
+    HK_FLAG_MANAGED_IRQ
+    HK_FLAG_KTHREAD
+};
+```
+
+`isolcpus` by default only isolate CPU with domain, which can be also achieved by cgroup cpusets. But some flags can be specified before cpu-list to isolate other components. Refer to [The kernel’s command-line parameters](https://www.kernel.org/doc/html/latest/admin-guide/kernel-parameters.html) for more detail.
+
+`nohz_full` isolates CPU with TICK/WQ/TIMER/RCU/MISC/KTHREAD components.
+```c
+static int __init housekeeping_nohz_full_setup(char *str)
+{
+    unsigned int flags;
+
+    flags = HK_FLAG_TICK | HK_FLAG_WQ | HK_FLAG_TIMER | HK_FLAG_RCU |
+        HK_FLAG_MISC | HK_FLAG_KTHREAD;
+
+    return housekeeping_setup(str, flags);
+}
+```
+
+## RCU NOHZ
+
+```c
+void __init rcu_init_nohz(void)
+{
+    ...
+
+    /* build rcu_no_cb_mask (nocb_rcu | nohz_full mask) */
+    cpumask_or(rcu_nocb_mask, rcu_nocb_mask, tick_nohz_full_mask);
+
+    for_each_cpu(cpu, rcu_nocb_mask) {
+        rdp = per_cpu_ptr(&rcu_data, cpu);
+
+        rcu_segcblist_offload(&rdp->cblist, true);
+
+        rcu_segcblist_set_flags(&rdp->cblist,
+                SEGCBLIST_KTHREAD_CB | SEGCBLIST_KTHREAD_GP);
+
+        rcu_segcblist_clear_flags(&rdp->cblist, SEGCBLIST_RCU_CORE);
+    }
+
+    rcu_organize_nocb_kthreads();
+
+}
+```
+
+
+## Links
+
+

@@ -3,7 +3,7 @@ layout: post
 title: "How Kprobe works"
 date: 2022-02-22
 categories: jekyll blogging
-tags: [kprobe]
+tags: [tracing, kprobe]
 ---
 
 In this article, we will look at how kprobe is implemented in Linux kernel, in particular on X86 architecture.
@@ -79,7 +79,9 @@ int register_kprobe(struct kprobe *p)
     */
     preare_kprobe(p);
 
-    /* EYONGGU: call arch specific arch_arm_kprobe(p) below */
+    /* EYONGGU: call arch specific arch_arm_kprobe(p) below.
+       note, if ftrace kprobe, it call arm_kprobe_ftrace(kp) instead.
+    */
     arm_kprobe(p)
 
     /* Try to optimize normal (non-ftrace-based) kprobe */
@@ -197,7 +199,7 @@ int kprobe_int3_handler(struct pt_regs *regs)
     }
 }
 ```
-## Kprobe optimization (TODO)
+## Kprobe optimization
 
 As seen in the register_kprobe() above, the last step is to call a function try_to_optimize_kprobe(p), which tries to optimize the kprobe by replacing a breakpoint with a jump instruction. Jump optimization reduces probing overhead drastically.
 
@@ -289,11 +291,13 @@ static int pre_handler_kretprobe(struct kprobe *p, struct pt_regs *regs)
 {
     ...
 
+    /* EYONGGU: Within it, the return addr is replaced with trampoline addr */
     arch_prepare_kretprobe(ri, regs);
 
     ...
 }
 ```
+The trampoline function on X86 is defined in [arch/x86/kernel/kprobes/core.c](https://github.com/torvalds/linux/blob/master/arch/x86/kernel/kprobes/core.c#L1020), which will saves registers and calls trampoline_handler().
 
 ## Links
 - [Kernel Probes (Kprobes)](https://www.kernel.org/doc/Documentation/kprobes.txt)

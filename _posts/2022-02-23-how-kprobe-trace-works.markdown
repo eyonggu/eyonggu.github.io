@@ -3,7 +3,7 @@ layout: post
 title: "How Kprobe-based trace event works"
 date: 2022-02-23
 categories: jekyll blogging
-tags: [kprobe, tracing]
+tags: [tracing, kprobe]
 ---
 
 In previous article, we looked at how normal kprobe works. Based on kprobe, it is possible to create dynamic trace event. In this one, let's look at ohow the kprobe-based trace event works.
@@ -39,7 +39,7 @@ Synopsis of kprobe_events:
  -:[GRP/]EVENT                                         : Clear a probe
 ```
 
-An event is defined by ``[GRP/][EVENT]``, Kprobe is defined by ``[MOD:]SYM[+offs]|MEMADDR``.
+An event is defined by ``[GRP/][EVENT]``, Kprobe is defined by ``[MOD:]SYM[+offs]|MEMADDR``, ``[FETCHARGS]`` becomes kind of pre_hander of the kprobe.
 
 It is possible to add multiple kprobes to the same event, for example:
 

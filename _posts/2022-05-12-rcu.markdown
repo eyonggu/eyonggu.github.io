@@ -1,0 +1,176 @@
+---
+layout: post
+title: "RCU introduction"
+date: 2022-05-12
+categories: jekyll blogging
+published: true
+---
+
+**WORK IN PROGRESS**
+
+## Key Data Structure
+- struct rcu_state
+  RCU global state, including node hierarchy.
+
+- struct rcu_node
+  Definition for node within the RCU grace-period-detection hierarchy
+
+- struct rcu_data
+  Per-CPU data for RCU
+
+- struct rcu_head/calback_head
+  callback structure for use with RCU and task_work
+
+
+- struct rcu_segcblist
+  RCU segmented callback lists
+
+
+## RCU Kthread creation
+
+- rcuc/x:  per-CPU kthread per CPU
+  rcu_core() peforms RCU core processing work.
+
+  Thread function: rcu_cpu_kthread()
+
+- rcu_preempt / rcu_sched
+  RCU GP kthread.
+
+  Thread function: rcu_gp_kthread()
+
+- rcuo[p/s]/x
+  NO-CB RCU offload kthread.
+
+  rcuop/x for RCU-preempt, rucos for RCU-sched.
+
+  Thread function: rcu_nocb_cb_kthread()
+
+- rcuog
+  RCU NO-CBs Grace Period kthread for a group of CPUs
+
+  Thread function: rcu_nocb_gp_kthread()
+
+- rcub
+
+- rcu_tasks_kthread
+  Task-based RCU grace-period kthread.
+  Spawned by `rcu_spawn_tasks_kthread_generic(struct rcu_tasks *rtp)`.
+
+- rcu_gp
+  ???
+
+- rcu_par_gp
+  ???
+
+## RCU init
+
+```c
+void __init rcu_init(void)
+{
+    ...
+
+    /* Calculate rcu_node tree geometry by cpu numbers */
+    rcu_init_geometry();
+
+    rcu_init_one();
+
+    /* If not with CONFIG_PREEMPT_RT, use RCU_SOFTIRQ instead of rcuc kthread */
+    if (use_softirq)
+        open_softirq(RCU_SOFTIRQ, rcu_core_si);
+
+    for_each_online_cpu(cpu) {
+        /* spawn boost (rcub) per-node, and nocb (rucogp and rcuop) kthread per-nocb-CPU*/
+        rcutree_prepare_cpu(cpu);
+
+        rcu_cpu_starting(cpu);
+
+        rcutree_online_cpu(cpu);
+    }
+
+    /* Create workqueue for Tree SRCU and for expedited GPs.
+
+     */
+    rcu_gp_wq = alloc_workqueue("rcu_gp", WQ_MEM_RECLAIM, 0);
+    rcu_par_gp_wq = alloc_workqueue("rcu_par_gp", WQ_MEM_RECLAIM, 0);
+}
+```
+
+
+```c
+static int __init rcu_spawn_gp_kthread(void)
+{
+    ...
+
+    /* Create rcu_preempt or rcu_sched */
+    kthread_create(rcu_gp_kthread, NULL, "%s", rcu_state.name);
+
+    /* Create rcuog (= rdp->nocb_gp_kthread) and rcuo[p/s]/x (= rdp->nocb_cb_kthread) */
+    rcu_spawn_nocb_kthreads();
+
+    /* Create rcub/x */
+    rcu_spawn_boost_kthreads();
+
+    /* Create rcuc/x (= rdp->rcu_cpu_kthread_task) */
+    rcu_spawn_core_kthreads();
+}
+```
+
+```c
+void __init rcu_init_nohz(void)
+{
+    ...
+
+    cpumask_or(rcu_nocb_mask, rcu_nocb_mask, tick_nohz_full_mask);
+
+    for_each_cpu(cpu, rcu_nocb_mask) {
+        ...
+    }
+
+    rcu_organize_nocb_kthreads();
+}
+
+```
+
+## RCU callback
+
+If updater can't wait by using synchronize_rcu(), it can use call_rcu() to queue an callbcak for invocation after a grace period.
+
+```c
+void call_rcu(struct rcu_head *head, rcu_callback_t func)
+{
+    __call_rcu(head, func);
+}
+
+static void
+__call_rcu(struct rcu_head *head, rcu_callback_t func)
+{
+    ...
+
+    /* Add the callback to this cpu's list */
+    rcu_segcblist_enqueue(&rdp->cblist, head);
+
+    if (unlikely(rcu_rdp_is_offloaded(rdp))) {
+        /* offloaded, wake up NOCB GP kthread */
+        __call_rcu_nocb_wake(rdp, was_alldone, flags);
+    } else {
+        /* let rcuc kthread/softirq do RCU core processing, see detail in invoke_rcu_core() */
+        __call_rcu_core(rdp, head, flags);
+    }
+}
+
+```
+
+After grace period, the completed/ready callbacks will be called, either in kthread rcuc [rcu_core()] or offloading ruco kthread.
+
+```c
+static void rcu_do_batch(struct rcu_data *rdp)
+{
+}
+```
+
+
+## Links
+
+- [RCU Data Structure](https://www.kernel.org/doc/Documentation/RCU/Design/Data-Structures/Data-Structures.html)
+
+

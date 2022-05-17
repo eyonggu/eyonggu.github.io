@@ -1,0 +1,228 @@
+---
+layout: post
+title: "Boot Linux directly with EFI stub"
+date: 2022-03-17
+categories: jekyll blogging
+published: false
+---
+
+There are many ways to boot Linux kernel, for examples:
+- BIOS -> Bootloader -> Kernel
+- UEFI -> Bootloader -> Kernel
+- UEFI -> Kernel (with EFI stub)
+
+That means there are multiple entry point functions in the kernel, and which entry points called by which depends on the different boot alternatives above.
+
+Note, in this post, the focus is on the boot procedure, not on the detail steps of hw/sw initialization.
+
+## bzImage format
+
+Before directly dig into boot procedure, let's first take a look at the kernel image format.
+
+bzImage contains two parts:
+
+* setup.bin
+
+    This binary contains of PE header(optional), setup header and real-mode boot code.
+
+    Entry point is defined in [arch/x86/boot/header.S], and linked by [arch/x86/boot/setup.ld]
+
+    This binary is very relavent for booting, so it will be described below in detail.
+
+* vmlinux.bin
+
+    This is the protected and long mode code of the kernel, it is linked by [arch/x86/boot/compressed/vmlinux.lds.S].
+
+   The first line of code of vmlinux is defined in [arch/x86/boot/compressed/head_64.S], 32bit entry point (startup_32) is at offset 0x0, and 64bit entry point (startup_64) is at offset 0x200.
+
+
+## Setup.bin
+In the first part of bzImage, setup.bin consists of:
+** PE header
+
+    With EFI stub, the image has a standard PE header, so that it can be recognized as a PE executable, and can be started directly by UEFI.
+
+    PE header is defined in file [arch/x86/boot/header.S], surronded by CONFIG_EFI_STUB directives.
+
+** setup header
+
+    This header is also defined in [arch/x86/boot/header.S], and follows the [Linux/X86 Boot Protocol](https://www.kernel.org/doc/html/latest/x86/boot.html#)
+
+
+** real-mode setup code
+
+   This part of code is defined under [arch/x86/boot/]
+
+The image can examined:
+```sh
+dd if=bzImage bs=512 count=2 | hexdump -C
+```
+
+The headers of setup.bin look like this:
+
+![header.S](/assets/x86_header.S.png)
+
+Some fields of the header have to decided during compiling time, this is done by the [build.c] tool.
+
+```c
+static void update_pecoff_text(...)
+{
+    ...
+
+    pe_header = get_unaligned_le32(&buf[0x3c]);
+
+    /* Size of code .. */
+    put_unaligned_le32(file_sz - 512 + bss_sz, &buf[pe_header + 0x1c]);
+
+    /* Size of image */
+    put_unaligned_le32(init_sz, &buf[pe_header + 0x50]);
+
+    /* Address of entry point for PE/COFF executable */
+    put_unaligned_le32(text_start + efi_pe_entry, &buf[pe_header + 0x28]);
+
+    /* Section header */
+    update_pecoff_section_header_fields(".text", text_start, text_sz+ bss_sz,
+            text_sz, text_start);
+
+}
+```
+
+## Boot: 64-bit UEFI -> 64-bit Kernel with EFI stub
+
+UEFI is now more common on new systems, and most of distribution kernel also support EFI stub, therefore, it is possible to boot kernel without any additional bootloader.
+
+The example for how to do it on Debian can be seen https://wiki.debian.org/EFIStub .
+
+Seen from above, **efi_pe_entry()** is the entry point of PE executable. UEFI starts to execute from it after the kernel image is read in.
+
+```c
+efi_status_t __efiapi efi_pe_entry(efi_handle_t handle,
+        efi_system_table_t *sys_table_arg)
+{
+    ...
+
+    /* get the loaded bzImage info.
+       startup_32 is the first line of code of kernel image.
+     */
+    image_base = efi_table_attr(image, image_base);
+    image_offset = (void *)startup_32 - image_base;
+
+    /* allocate struct boot_params */
+    efi_allocate_pages(sizeof(struct boot_params), (unsigned long *)&boot_params, ULONG_MAX);
+
+    hdr = &boot_params->hdr;
+
+    /* Copy the setup header */
+    memcpy(&hdr->jump, image_base + 512, sizeof(struct setup_header) - offsetof(struct setup_header, jump));
+
+}
+```
+
+The function call graph:
+
+```
+efi_pe_entry(handle, sys_table)
+    |-> efi64_stub_entry(handle, sys_table, boot_params)
+        |-> efi_main(handle, sys_table, boot_params)
+        |-> startup_64()
+            |-> /* copy compressed kernel to the end of the buffer */
+            |-> %rax = extract_kernel()
+            |-> jump %rax
+```
+
+## Boot: 64-bit UEFI -> 64-bit bootloader -> 64-bit Kernel (EFI stub)
+
+This is most common boot procedure on modern system and popular Linux distribution, i.e. kernel is indirectly booted by a boot loader.
+
+
+
+## Boot: BIOS -> 16-bit bootloader -> 64-bit Kernel
+
+Old system that uses BIOS starts up in the Real-mode (16-bit), which has 20-bit segmented memory address space (only 1 MB of memory can be addressed).
+
+![boot with BIOS](/assets/boot_with_bios.png)
+
+
+Real-mode **main()** function is located under [arch/x86/boot/main.c](https://github.com/torvalds/linux/blob/master/arch/x86/boot/main.c)
+
+```c
+void main(void)
+{
+    /* First, copy the boot header into the "zeropage" */
+    copy_boot_params();
+
+    /* Initialize the early-boot console */
+    console_init();
+
+    /* End of heap check */
+    init_heap();
+
+    /* Make sure we have all the proper CPU support */
+    validate_cpu();
+
+    /* Tell the BIOS what CPU mode we intend to run in. */
+    set_bios_mode();
+
+    /* Detect memory layout */
+    detect_memory();
+
+    /* Set keyboard repeat rate (why?) and query the lock flags */
+    keyboard_init();
+
+    /* Set the video mode */
+    set_video();
+
+    /* Do the last things and invoke protected mode */
+    go_to_protected_mode();
+}
+```
+
+It's not a big function, and only initializes necessary things, then jump to protected mode.
+
+The entry point of protected mode is filled in **boot_params.hdr.code32_start** by bootloader.
+
+```c
+void go_to_protected_mode(void)
+{
+
+    ...
+
+    /* Mask all interrupts in the PIC */
+    mask_all_interrupts();
+
+    /* Actual transition to protected mode... */
+    setup_idt();
+    setup_gdt();
+    protected_mode_jump(boot_params.hdr.code32_start,
+            (u32)&boot_params + (ds() << 4));
+}
+```
+## Boot: 32-bit UEFI (and bootloader) -> 64-bit Kernel with 32-bit EFI Stub
+
+There are also platforms that still use 32-bit UEFI firmware, but the CPU and kernel are 64-bit.
+In this case, to directly boot kernel, CONFIG_EFI_MIXED option can be enabled to support this use case.
+
+Since firmware can't directly jump to 64-bit entry point (efi_pe_entry), there is another entry point **efi32_pe_entry** for 32-bit.
+The address of it is stored in section .compat of setup header during kernel build, the firmware/bootloader can look for and jump to it.
+
+The function call graph:
+
+```
+efi32_pe_entry(handle, sys_table)
+    |-> efi32_pe_stub_entry [efi32_stub_entry]
+        |-> efi_main(handle, sys_table, boot_params)
+        |-> startup_32()
+            |-> ...
+            |-> jump to 64-bit
+```
+
+## Update in this area
+- EFI handover protocol is deprecated (2020)
+
+
+## Links
+- [Linux Boot Protocol by lse 2015](https://www.lse.epita.fr/lse-summer-week-2015/slides/lse-summer-week-2015-05-Linux_Boot_Protocol.pdf)
+- [Linux bootstrap by 0xax](https://0xax.gitbooks.io/linux-insides/content/Booting/linux-bootstrap-1.html)
+- [EFI Stub for Debian](https://wiki.debian.org/EFIStub)
+
+
